@@ -1,0 +1,28 @@
+name: Build and Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release ZIP
+        run: |
+          ./scripts/create_release_zip.sh "${GITHUB_REF_NAME}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MenuBarLG-${{ github.ref_name }}.zip
+          generate_release_notes: true

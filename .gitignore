@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific files
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
+xcuserdata/
+
+# Xcode build artifacts
+build/
+build_tmp/
+DerivedData/
+dist/
+
+# Swift Package Manager
+.build/
+
+# Common temp/editor artifacts
+*.swp
+*.tmp
