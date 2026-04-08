@@ -162,22 +162,19 @@ This generates:
 
 - `dist/MenuBarLG-v1.0.0.zip`
 
-### Automated release on tag push
+### Manual GitHub release
 
-This repo includes:
+1. Build artifact locally:
 
-- `.github/workflows/release.yml`
+```bash
+./scripts/create_release_zip.sh v1.0.0
+```
 
-Behavior:
+2. Create release and upload artifact with GitHub CLI:
 
-1. Push a tag like `v1.0.0`.
-2. GitHub Actions builds a Release app.
-3. Workflow packages `MenuBarLG.app` into a ZIP.
-4. Workflow creates/updates the GitHub Release and uploads the ZIP.
-
-Note:
-
-- GitHub Actions build is unsigned (`CODE_SIGNING_ALLOWED=NO`), so users may need to right-click -> Open on first launch.
+```bash
+gh release create v1.0.0 dist/MenuBarLG-v1.0.0.zip --title "v1.0.0" --generate-notes
+```
 
 Tag command example:
 
@@ -185,6 +182,10 @@ Tag command example:
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+Note:
+
+- The ZIP build is unsigned (`CODE_SIGNING_ALLOWED=NO`), so some users may need right-click -> Open on first launch.
 
 ## Using the App
 
