@@ -201,6 +201,9 @@ If icon visibility is `Show 5s On Startup` and the icon disappears:
 
 - Press `Control + Option + Command + M` to restore it temporarily.
 
+- <img width="1470" height="99" alt="image" src="https://github.com/user-attachments/assets/71ebef4a-eeba-4d09-942a-ab1d27c5a070" />
+
+
 ## Default Behavior
 
 - Blur enabled on first launch.
