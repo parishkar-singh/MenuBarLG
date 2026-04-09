@@ -1,6 +1,8 @@
 # MenuBarLG
 
 MenuBarLG is a native macOS menu bar app (Swift + AppKit) that renders a full-width Liquid Glass overlay behind the menu bar on each connected display.
+<img width="1470" height="99" alt="image" src="https://github.com/user-attachments/assets/30522737-2ca4-4700-9ee5-2420d9bdec03" />
+
 
 The app runs as an `LSUIElement` accessory app (no Dock icon) and is controlled from a status item and a settings window.
 
