@@ -1,15 +1,17 @@
 # MenuBarLG
 
-MenuBarLG is a native macOS menu bar app (Swift + AppKit) that renders a full-width Liquid Glass overlay behind the menu bar on each connected display.
-<img width="1470" height="99" alt="image" src="https://github.com/user-attachments/assets/30522737-2ca4-4700-9ee5-2420d9bdec03" />
+MenuBarLG is a native macOS menu bar app (Swift + AppKit) that renders a full-width visual overlay behind the menu bar on each connected display.
 
+It supports two rendering modes:
+
+- `Liquid Glass` (`NSGlassEffectView`, macOS 26+)
+- `Backdrop Blur` (`NSVisualEffectView` materials + blending)
 
 The app runs as an `LSUIElement` accessory app (no Dock icon) and is controlled from a status item and a settings window.
 
 ## What It Does
 
 - Renders a non-interactive overlay window per display at the top safe-area/menu-bar region.
-- Uses `NSGlassEffectView` (macOS 26+) for Liquid Glass rendering.
 - Reacts live to:
   - Theme changes (`Automatic`, `Light`, `Dark`)
   - System appearance switches
@@ -17,7 +19,7 @@ The app runs as an `LSUIElement` accessory app (no Dock icon) and is controlled 
   - Display topology/resolution changes
 - Supports blur enable/disable without destroying windows.
 - Includes launch-at-login support using `SMAppService`.
-- Provides per-preset tuning controls with live preview and debounced persistence.
+- Provides live tuning controls with debounced persistence where appropriate.
 
 ## Key Features
 
@@ -31,6 +33,7 @@ The app runs as an `LSUIElement` accessory app (no Dock icon) and is controlled 
 
 Overlay height is computed from:
 
+- Top inset from `screen.frame.maxY - screen.visibleFrame.maxY`
 - `NSStatusBar.system.thickness`
 - `screen.safeAreaInsets.top`
 - `screen.auxiliaryTopLeftArea?.height`
@@ -38,28 +41,52 @@ Overlay height is computed from:
 
 The maximum of these values is used so notch-area Macs align correctly.
 
-### 3. Liquid Glass Rendering + Edge Treatment
+### 3. Two Blur Modes With Mode-Specific Controls
+
+#### Liquid Glass mode
 
 - Primary rendering: `NSGlassEffectView`
-- Presets: `More Liquid`, `Normal`, `Frosted`
-- Per-preset controls:
-  - Alpha (`0...1`)
-  - Tint (`-1...1`)
-    - Positive = white tint
-    - Negative = black tint overlay
-- Bottom-only border and shadow layers emulate Dock-like edge separation.
+- Variant options:
+  - `Regular`
+  - `Clear`
+  - `Dock`
+  - `AV Player`
+  - `Control Center`
+  - `Notification Center`
+  - `Monogram`
+- Style options: `Clear` / `Regular` (applies to `Regular` and `Clear` variants)
+- Extra controls:
+  - `Scrim` (adds opaque wash)
+  - `Subdued` (flattens highlights)
+  - Tint slider (`-2.0 ... 2.0`, black <-> white bias)
 
-### 4. Accessibility Handling
+#### Backdrop Blur mode
+
+- Rendering: layered `NSVisualEffectView` passes for stronger visible blur while keeping live backdrop sampling.
+- Controls:
+  - Material (`Menu`, `Sidebar`, `Header View`, `Window Background`, `Under Window Background`, `HUD Window`)
+  - Blend mode (`Behind Window`, `Within Window`)
+  - `Emphasized` toggle
+  - `Alpha` slider (`0...1`)
+  - `Intensity` slider (`0...1`)
+
+### 4. Custom Corner Radii
+
+- Optional per-corner radii controls in a dedicated `Corners` tab.
+- Independent sliders for top-left/top-right/bottom-left/bottom-right.
+- Real-time mask updates with sane clamping (`0...100 px`).
+
+### 5. Accessibility Handling
 
 When **Reduce Transparency** is enabled:
 
-- Liquid Glass is replaced by a solid `NSColor.windowBackgroundColor` fallback.
+- Blur/glass rendering is replaced by a solid `NSColor.windowBackgroundColor` fallback.
 
 When disabled:
 
-- Liquid Glass rendering is restored immediately.
+- The selected blur mode is restored immediately.
 
-### 5. Operability-Safe Status Icon Modes
+### 6. Operability-Safe Status Icon Modes
 
 Status icon modes:
 
@@ -72,9 +99,7 @@ Recovery safeguards for startup-only mode:
 - Opening Settings forces the icon visible while the settings window is open.
 - Menu action: `Show Menu Icon for 25 Seconds`.
 
-This avoids “no way back” states and removes dependency on Activity Monitor force-kill.
-
-### 6. Settings Window (Structured Sections)
+### 7. Settings Window (Tabbed)
 
 - **General**
   - Enable Menu Bar Glass
@@ -83,21 +108,21 @@ This avoids “no way back” states and removes dependency on Activity Monitor 
   - Recovery shortcut hint
 - **Appearance**
   - Theme mode (`Automatic`, `Light`, `Dark`)
-  - Glass feel preset (`More Liquid`, `Normal`, `Frosted`)
-- **Tuning**
-  - Per-preset alpha/tint sliders
-  - Reset to defaults
+  - Blur Type (`Liquid Glass`, `Backdrop Blur`)
+  - Mode-specific controls shown contextually
+- **Corners**
+  - Enable custom corners
+  - Per-corner radius sliders
+  - Reset all corners
 - **Credits**
   - Developer attribution
   - GitHub profile link
 
-### 7. Persistence Model
+### 8. Persistence Model
 
-No external JSON file polling is used.
-
-- Live state updates immediately for on-screen preview.
-- Persisted state is debounced (300ms) and stored in `UserDefaults`.
-- Pending writes are flushed on app termination.
+- `BlurStyleManager` persists blur-mode configuration immediately via `UserDefaults`.
+- `GlassTuningManager` persists tint/corner state with a 300ms debounce.
+- Pending debounced writes are flushed on app termination.
 
 ## Technical Architecture
 
@@ -110,15 +135,15 @@ Each major area is isolated into dedicated classes:
 - `MenuBarOverlayWindow.swift`
   - Configures per-screen transparent overlay window properties.
 - `GlassViewController.swift`
-  - Applies Liquid Glass appearance and fallback states.
+  - Applies Liquid Glass or Backdrop Blur appearance and fallback states.
   - Uses coalesced post-layout appearance application to avoid layout recursion.
 - `ThemeManager.swift`
   - Maintains effective theme and reduce-transparency state.
   - Observes AppKit KVO + distributed notifications + accessibility notifications.
 - `BlurStyleManager.swift`
-  - Manages selected preset and persistence.
+  - Manages blur mode selection and per-mode controls/state persistence.
 - `GlassTuningManager.swift`
-  - Manages per-preset alpha/tint live state and debounced persistence.
+  - Manages tint and corner controls with debounced persistence.
 - `ToggleManager.swift`
   - Manages blur enabled state.
 - `StatusItemVisibilityManager` (inside `ToggleManager.swift`)
@@ -126,7 +151,7 @@ Each major area is isolated into dedicated classes:
 - `StatusMenuController.swift`
   - Owns status item, menu actions, and hidden-mode recovery behavior.
 - `SettingsWindowController.swift`
-  - Builds and binds settings UI sections.
+  - Builds and binds settings UI tabs and controls.
 - `LaunchAtLoginManager.swift`
   - Integrates login item enable/disable/status (`SMAppService`).
 
@@ -134,7 +159,7 @@ Each major area is isolated into dedicated classes:
 
 - macOS `26.0+`
 - Xcode `17+` (for macOS 26 SDK / `NSGlassEffectView`)
-- Apple Developer membership is only required for Mac App Store distribution
+- Apple Developer membership is only required for Mac App Store distribution/signing workflows
 
 ## Build & Run
 
@@ -144,17 +169,15 @@ Each major area is isolated into dedicated classes:
 2. Select the `MenuBarLG` scheme.
 3. Build and Run (`Cmd + R`).
 
-### CLI
+### CLI (Debug)
 
 ```bash
 xcodebuild -project MenuBarLG.xcodeproj -scheme MenuBarLG -configuration Debug build
 ```
 
-## GitHub Releases Distribution
+## Release Packaging
 
-You can distribute builds through GitHub Releases without App Store submission.
-
-### Local release package
+### Scripted zip (recommended)
 
 ```bash
 ./scripts/create_release_zip.sh v1.0.0
@@ -164,58 +187,61 @@ This generates:
 
 - `dist/MenuBarLG-v1.0.0.zip`
 
-### Manual GitHub release
-
-1. Build artifact locally:
+### Manual release build to repo root
 
 ```bash
-./scripts/create_release_zip.sh v1.0.0
+xcodebuild -project MenuBarLG.xcodeproj -scheme MenuBarLG -configuration Release -sdk macosx -derivedDataPath ./build CODE_SIGNING_ALLOWED=NO build
+mv build/Build/Products/Release/MenuBarLG.app MenuBarLG-Release.app
+ditto -c -k --sequesterRsrc --keepParent MenuBarLG-Release.app MenuBarLG-Release.zip
 ```
 
-2. Create release and upload artifact with GitHub CLI:
+## GitHub Release Example
 
-```bash
-gh release create v1.0.0 dist/MenuBarLG-v1.0.0.zip --title "v1.0.0" --generate-notes
-```
-
-Tag command example:
+Use whichever artifact you generated (`dist/MenuBarLG-v1.0.0.zip` or `MenuBarLG-Release.zip`).
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
+gh release create v1.0.0 <artifact-path>.zip --title "v1.0.0" --generate-notes
 ```
 
 Note:
 
-- The ZIP build is unsigned (`CODE_SIGNING_ALLOWED=NO`), so some users may need right-click -> Open on first launch.
+- Unsigned builds (`CODE_SIGNING_ALLOWED=NO`) can require right-click -> Open on first launch.
 
 ## Using the App
 
 1. Launch app.
-2. Click status item icon (`menubar.rectangle` symbol).
+2. Click the status item icon (`menubar.rectangle` symbol).
 3. Use:
-   - `Settings…`
+   - `Open Settings…`
    - `Enable Menu Bar Glass` toggle
    - `Quit`
-4. In Settings, tune appearance and startup/login behavior.
+4. In Settings, tune appearance, corners, and startup/login behavior.
 
 If icon visibility is `Show 5s On Startup` and the icon disappears:
 
 - Press `Control + Option + Command + M` to restore it temporarily.
 
-- <img width="1470" height="99" alt="image" src="https://github.com/user-attachments/assets/71ebef4a-eeba-4d09-942a-ab1d27c5a070" />
-
-
 ## Default Behavior
 
 - Blur enabled on first launch.
 - Theme mode: `Automatic`.
-- Material preset: `More Liquid`.
+- Blur type: `Liquid Glass`.
+- Liquid defaults:
+  - Variant: `Dock`
+  - Style: `Clear`
+  - Scrim: off
+  - Subdued: off
+  - Tint: off (`0`)
+- Backdrop defaults (when using Backdrop Blur):
+  - Material: `HUD Window`
+  - Blend mode: `Within Window`
+  - Emphasized: on
+  - Alpha: `100%`
+  - Intensity: `76%`
+- Custom corners: disabled, all radii `0 px`.
 - Status icon mode: `Always Visible`.
-- Tuning defaults:
-  - More Liquid: alpha `0.90`, style `clear`, tint `0.00`
-  - Normal: alpha `0.90`, style `regular`, tint `0.05`
-  - Frosted: alpha `1.00`, style `regular`, tint `0.50`
 
 ## Window/Overlay Characteristics
 
@@ -223,7 +249,7 @@ Overlay windows are configured to be non-disruptive:
 
 - `.borderless`, transparent, non-opaque
 - `ignoresMouseEvents = true`
-- Cannot become key/main
+- Can temporarily become key/main to maintain active appearance rendering
 - Collection behavior:
   - `.canJoinAllSpaces`
   - `.stationary`
@@ -237,25 +263,28 @@ Overlay windows are configured to be non-disruptive:
 - Press `⌃⌥⌘M` to reveal it for 25 seconds.
 - Or relaunch the app and use startup reveal window (if startup-only mode is enabled).
 
-### “Reduce Transparency is ON and blur is gone”
+### “Blur disappeared”
 
-- Expected behavior. The app intentionally switches to a solid fallback color.
+- Check `System Settings > Accessibility > Display > Reduce transparency`.
+- If enabled, MenuBarLG intentionally uses a solid fallback color.
 
 ### “Launch at login says approval required”
 
-- Open: `System Settings > General > Login Items`
+- Open `System Settings > General > Login Items`.
 - Approve/enable the app entry.
 
 ### “Appearance changes feel delayed”
 
-- Slider writes are debounced for persistence, but preview updates are immediate.
+- Appearance mode switches apply immediately.
+- Tint/corner persistence is debounced (preview remains live).
 
-## Privacy and Dependencies
+## Privacy, APIs, and Dependencies
 
 - No third-party dependencies.
-- No private APIs.
-- No network requirement for runtime operation.
-- Uses only standard Apple frameworks (`AppKit`, `ServiceManagement`, `Carbon` for hotkey registration).
+- No runtime network requirement.
+- Uses standard Apple frameworks (`AppKit`, `ServiceManagement`, `Carbon` for hotkey registration).
+- Liquid Glass variant/scrim/subdued controls use private selectors on `NSGlassEffectView`.
+  - Practical implication: this can be fragile across macOS updates and may not be appropriate for App Store review.
 
 ## Credits
 
@@ -264,6 +293,6 @@ Overlay windows are configured to be non-disruptive:
 
 ## Roadmap Ideas
 
-- Export/import tuning profiles.
+- Export/import appearance profiles.
 - Optional onboarding prompt for hidden icon mode recovery.
 - Optional keyboard shortcut customization.
