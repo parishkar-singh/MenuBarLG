@@ -6,125 +6,173 @@ extension Notification.Name {
 
 @MainActor
 final class GlassTuningManager {
-    struct PresetTuning: Codable, Equatable {
-        var alphaValue: Double
-        var style: String
-        // Signed tint strength: +1 means white tint, -1 means black tint.
-        var tintWhiteAlpha: Double
+    enum Corner: CaseIterable {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
     }
 
-    struct TuningFile: Codable, Equatable {
-        var moreLiquid: PresetTuning
-        var normal: PresetTuning
-        var frosted: PresetTuning
+    struct CornerRadii: Equatable {
+        var topLeft: Double
+        var topRight: Double
+        var bottomLeft: Double
+        var bottomRight: Double
+
+        static let zero = CornerRadii(topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0)
+
+        func value(for corner: Corner) -> Double {
+            switch corner {
+            case .topLeft:
+                return topLeft
+            case .topRight:
+                return topRight
+            case .bottomLeft:
+                return bottomLeft
+            case .bottomRight:
+                return bottomRight
+            }
+        }
+
+        mutating func setValue(_ value: Double, for corner: Corner) {
+            switch corner {
+            case .topLeft:
+                topLeft = value
+            case .topRight:
+                topRight = value
+            case .bottomLeft:
+                bottomLeft = value
+            case .bottomRight:
+                bottomRight = value
+            }
+        }
     }
 
-    static let defaultTuningFile = TuningFile(
-        moreLiquid: PresetTuning(alphaValue: 0.90, style: "clear", tintWhiteAlpha: 0.00),
-        normal: PresetTuning(alphaValue: 0.90, style: "regular", tintWhiteAlpha: 0.05),
-        frosted: PresetTuning(alphaValue: 1.00, style: "regular", tintWhiteAlpha: 0.50)
-    )
+    static let minTintWhiteAlpha: Double = -2.0
+    static let maxTintWhiteAlpha: Double = 2.0
+    static let minCornerRadius: Double = 0.0
+    static let maxCornerRadius: Double = 100.0
 
-    private static let userDefaultsKey = "menuBarGlassTuningFileV1"
+    private static let tintUserDefaultsKey = "menuBarGlassTintWhiteAlpha"
+    private static let customCornersEnabledUserDefaultsKey = "menuBarGlassCustomCornersEnabled"
+    private static let legacyCornerRadiusUserDefaultsKey = "menuBarGlassCornerRadius"
+    private static let topLeftCornerRadiusUserDefaultsKey = "menuBarGlassCornerRadiusTopLeft"
+    private static let topRightCornerRadiusUserDefaultsKey = "menuBarGlassCornerRadiusTopRight"
+    private static let bottomLeftCornerRadiusUserDefaultsKey = "menuBarGlassCornerRadiusBottomLeft"
+    private static let bottomRightCornerRadiusUserDefaultsKey = "menuBarGlassCornerRadiusBottomRight"
     private static let persistenceDebounceInterval: TimeInterval = 0.30
 
     private let userDefaults: UserDefaults
     private var persistWorkItem: DispatchWorkItem?
 
-    // Live state drives immediate on-screen updates while the user drags sliders.
-    private(set) var tuningFile: TuningFile
-    // Persisted snapshot lets us skip redundant writes and keep writes coalesced.
-    private(set) var persistedTuningFile: TuningFile
+    private(set) var tintWhiteAlpha: Double
+    private(set) var customCornersEnabled: Bool
+    private(set) var cornerRadii: CornerRadii
+    private(set) var persistedTintWhiteAlpha: Double
+    private(set) var persistedCustomCornersEnabled: Bool
+    private(set) var persistedCornerRadii: CornerRadii
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
 
-        let initial = Self.loadPersistedTuningFile(from: userDefaults)
-        tuningFile = initial
-        persistedTuningFile = initial
+        let storedTint = userDefaults.object(forKey: Self.tintUserDefaultsKey) as? Double ?? 0
+        let sanitizedTint = Self.clampSignedTint(storedTint)
+        let storedCustomCornersEnabled = userDefaults.object(forKey: Self.customCornersEnabledUserDefaultsKey) as? Bool ?? false
+
+        let legacyCornerRadius = userDefaults.object(forKey: Self.legacyCornerRadiusUserDefaultsKey) as? Double
+        let storedTopLeft = userDefaults.object(forKey: Self.topLeftCornerRadiusUserDefaultsKey) as? Double ?? legacyCornerRadius ?? 0
+        let storedTopRight = userDefaults.object(forKey: Self.topRightCornerRadiusUserDefaultsKey) as? Double ?? legacyCornerRadius ?? 0
+        let storedBottomLeft = userDefaults.object(forKey: Self.bottomLeftCornerRadiusUserDefaultsKey) as? Double ?? legacyCornerRadius ?? 0
+        let storedBottomRight = userDefaults.object(forKey: Self.bottomRightCornerRadiusUserDefaultsKey) as? Double ?? legacyCornerRadius ?? 0
+
+        let sanitizedCornerRadii = Self.sanitizeCornerRadii(
+            CornerRadii(
+                topLeft: storedTopLeft,
+                topRight: storedTopRight,
+                bottomLeft: storedBottomLeft,
+                bottomRight: storedBottomRight
+            )
+        )
+
+        tintWhiteAlpha = sanitizedTint
+        customCornersEnabled = storedCustomCornersEnabled
+        cornerRadii = sanitizedCornerRadii
+        persistedTintWhiteAlpha = sanitizedTint
+        persistedCustomCornersEnabled = storedCustomCornersEnabled
+        persistedCornerRadii = sanitizedCornerRadii
     }
 
     deinit {
         persistWorkItem?.cancel()
     }
 
-    func tuning(for preset: BlurStyleManager.MaterialPreset) -> PresetTuning {
-        switch preset {
-        case .moreLiquid:
-            return tuningFile.moreLiquid
-        case .normal:
-            return tuningFile.normal
-        case .frosted:
-            return tuningFile.frosted
+    func setTint(_ tintWhiteAlpha: Double) {
+        let sanitized = Self.clampSignedTint(tintWhiteAlpha)
+        guard sanitized != self.tintWhiteAlpha else {
+            return
         }
-    }
 
-    func alpha(for preset: BlurStyleManager.MaterialPreset) -> Double {
-        tuning(for: preset).alphaValue
-    }
-
-    func tint(for preset: BlurStyleManager.MaterialPreset) -> Double {
-        tuning(for: preset).tintWhiteAlpha
-    }
-
-    func setAlpha(_ alphaValue: Double, for preset: BlurStyleManager.MaterialPreset) {
-        mutateLiveTuning(for: preset) { tuning in
-            tuning.alphaValue = Self.clamp01(alphaValue)
-            tuning.style = Self.defaultStyle(for: preset)
-        }
-    }
-
-    func setTint(_ tintWhiteAlpha: Double, for preset: BlurStyleManager.MaterialPreset) {
-        mutateLiveTuning(for: preset) { tuning in
-            tuning.tintWhiteAlpha = Self.clampSignedTint(tintWhiteAlpha)
-            tuning.style = Self.defaultStyle(for: preset)
-        }
+        self.tintWhiteAlpha = sanitized
+        scheduleDebouncedPersistence()
+        notifyChanged()
     }
 
     func resetToDefaults() {
-        setLiveTuningFile(Self.defaultTuningFile, notify: true, schedulePersistence: true)
+        setTint(0)
     }
 
-    // Persist any pending writes immediately (used when the app is terminating).
+    func setCustomCornersEnabled(_ enabled: Bool) {
+        guard enabled != customCornersEnabled else {
+            return
+        }
+
+        customCornersEnabled = enabled
+        scheduleDebouncedPersistence()
+        notifyChanged()
+    }
+
+    func setCornerRadius(_ cornerRadius: Double) {
+        let sanitizedValue = Self.clampCornerRadius(cornerRadius)
+        setCornerRadii(
+            CornerRadii(
+                topLeft: sanitizedValue,
+                topRight: sanitizedValue,
+                bottomLeft: sanitizedValue,
+                bottomRight: sanitizedValue
+            )
+        )
+    }
+
+    func setCornerRadius(_ cornerRadius: Double, for corner: Corner) {
+        let sanitizedValue = Self.clampCornerRadius(cornerRadius)
+        var nextRadii = cornerRadii
+        nextRadii.setValue(sanitizedValue, for: corner)
+        setCornerRadii(nextRadii)
+    }
+
+    func setCornerRadii(_ cornerRadii: CornerRadii) {
+        let sanitized = Self.sanitizeCornerRadii(cornerRadii)
+        guard sanitized != self.cornerRadii else {
+            return
+        }
+
+        self.cornerRadii = sanitized
+        scheduleDebouncedPersistence()
+        notifyChanged()
+    }
+
+    func resetCornerRadiusToDefault() {
+        resetCornerRadiiToDefault()
+    }
+
+    func resetCornerRadiiToDefault() {
+        setCornerRadii(.zero)
+    }
+
     func flushPendingPersistence() {
         persistWorkItem?.cancel()
         persistWorkItem = nil
         persistIfNeeded()
-    }
-
-    private func mutateLiveTuning(
-        for preset: BlurStyleManager.MaterialPreset,
-        mutation: (inout PresetTuning) -> Void
-    ) {
-        var updated = tuningFile
-
-        switch preset {
-        case .moreLiquid:
-            mutation(&updated.moreLiquid)
-        case .normal:
-            mutation(&updated.normal)
-        case .frosted:
-            mutation(&updated.frosted)
-        }
-
-        setLiveTuningFile(updated, notify: true, schedulePersistence: true)
-    }
-
-    private func setLiveTuningFile(_ tuningFile: TuningFile, notify: Bool, schedulePersistence: Bool) {
-        // Normalize untrusted input before publishing it to renderer paths.
-        let sanitized = Self.sanitized(tuningFile)
-        let didChange = sanitized != self.tuningFile
-        self.tuningFile = sanitized
-
-        if schedulePersistence {
-            scheduleDebouncedPersistence()
-        }
-
-        guard notify, didChange else {
-            return
-        }
-
-        NotificationCenter.default.post(name: .menuBarGlassTuningChanged, object: self)
     }
 
     private func scheduleDebouncedPersistence() {
@@ -139,73 +187,53 @@ final class GlassTuningManager {
     }
 
     private func persistIfNeeded() {
-        let sanitized = Self.sanitized(tuningFile)
-        guard sanitized != persistedTuningFile else {
+        let sanitizedTint = Self.clampSignedTint(tintWhiteAlpha)
+        let sanitizedCustomCornersEnabled = customCornersEnabled
+        let sanitizedCornerRadii = Self.sanitizeCornerRadii(cornerRadii)
+        guard sanitizedTint != persistedTintWhiteAlpha
+            || sanitizedCustomCornersEnabled != persistedCustomCornersEnabled
+            || sanitizedCornerRadii != persistedCornerRadii else {
             return
         }
 
-        do {
-            let data = try JSONEncoder().encode(sanitized)
-            userDefaults.set(data, forKey: Self.userDefaultsKey)
-            persistedTuningFile = sanitized
-        } catch {
-            NSLog("MenuBarLG: Failed to persist glass tuning: %@", error.localizedDescription)
+        if sanitizedTint != persistedTintWhiteAlpha {
+            userDefaults.set(sanitizedTint, forKey: Self.tintUserDefaultsKey)
+            persistedTintWhiteAlpha = sanitizedTint
+        }
+
+        if sanitizedCustomCornersEnabled != persistedCustomCornersEnabled {
+            userDefaults.set(sanitizedCustomCornersEnabled, forKey: Self.customCornersEnabledUserDefaultsKey)
+            persistedCustomCornersEnabled = sanitizedCustomCornersEnabled
+        }
+
+        if sanitizedCornerRadii != persistedCornerRadii {
+            userDefaults.set(sanitizedCornerRadii.topLeft, forKey: Self.topLeftCornerRadiusUserDefaultsKey)
+            userDefaults.set(sanitizedCornerRadii.topRight, forKey: Self.topRightCornerRadiusUserDefaultsKey)
+            userDefaults.set(sanitizedCornerRadii.bottomLeft, forKey: Self.bottomLeftCornerRadiusUserDefaultsKey)
+            userDefaults.set(sanitizedCornerRadii.bottomRight, forKey: Self.bottomRightCornerRadiusUserDefaultsKey)
+            userDefaults.removeObject(forKey: Self.legacyCornerRadiusUserDefaultsKey)
+            persistedCornerRadii = sanitizedCornerRadii
         }
     }
 
-    private static func loadPersistedTuningFile(from userDefaults: UserDefaults) -> TuningFile {
-        guard let data = userDefaults.data(forKey: Self.userDefaultsKey) else {
-            let defaults = Self.defaultTuningFile
-            if let encodedDefaults = try? JSONEncoder().encode(defaults) {
-                userDefaults.set(encodedDefaults, forKey: Self.userDefaultsKey)
-            }
-
-            return defaults
-        }
-
-        do {
-            let decoded = try JSONDecoder().decode(TuningFile.self, from: data)
-            return sanitized(decoded)
-        } catch {
-            NSLog("MenuBarLG: Failed to decode persisted glass tuning: %@", error.localizedDescription)
-            return Self.defaultTuningFile
-        }
-    }
-
-    private static func sanitized(_ file: TuningFile) -> TuningFile {
-        TuningFile(
-            moreLiquid: sanitized(file.moreLiquid),
-            normal: sanitized(file.normal),
-            frosted: sanitized(file.frosted)
-        )
-    }
-
-    private static func sanitized(_ preset: PresetTuning) -> PresetTuning {
-        PresetTuning(
-            alphaValue: clamp01(preset.alphaValue),
-            style: normalizedStyle(preset.style),
-            tintWhiteAlpha: clampSignedTint(preset.tintWhiteAlpha)
-        )
-    }
-
-    private static func normalizedStyle(_ style: String) -> String {
-        style.lowercased() == "regular" ? "regular" : "clear"
-    }
-
-    private static func defaultStyle(for preset: BlurStyleManager.MaterialPreset) -> String {
-        switch preset {
-        case .moreLiquid:
-            return "clear"
-        case .normal, .frosted:
-            return "regular"
-        }
-    }
-
-    private static func clamp01(_ value: Double) -> Double {
-        min(max(value, 0), 1)
+    private func notifyChanged() {
+        NotificationCenter.default.post(name: .menuBarGlassTuningChanged, object: self)
     }
 
     private static func clampSignedTint(_ value: Double) -> Double {
-        min(max(value, -1), 1)
+        min(max(value, minTintWhiteAlpha), maxTintWhiteAlpha)
+    }
+
+    private static func clampCornerRadius(_ value: Double) -> Double {
+        min(max(value, minCornerRadius), maxCornerRadius)
+    }
+
+    private static func sanitizeCornerRadii(_ cornerRadii: CornerRadii) -> CornerRadii {
+        CornerRadii(
+            topLeft: clampCornerRadius(cornerRadii.topLeft),
+            topRight: clampCornerRadius(cornerRadii.topRight),
+            bottomLeft: clampCornerRadius(cornerRadii.bottomLeft),
+            bottomRight: clampCornerRadius(cornerRadii.bottomRight)
+        )
     }
 }

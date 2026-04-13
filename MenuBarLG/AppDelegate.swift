@@ -65,8 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindowController?.show()
         }
 
-        settingsWindowController.settingsVisibilityChangedHandler = { [weak statusMenuController] isVisible in
+        settingsWindowController.settingsVisibilityChangedHandler = { [weak statusMenuController, weak displayManager] isVisible in
             statusMenuController?.setSettingsWindowVisible(isVisible)
+            displayManager?.setForcedActiveAppearanceEnabled(true)
         }
     }
 

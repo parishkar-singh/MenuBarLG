@@ -12,6 +12,7 @@ final class DisplayManager {
     private var blurStyleObserver: NSObjectProtocol?
     private var glassTuningObserver: NSObjectProtocol?
     private var toggleObserver: NSObjectProtocol?
+    private var forcedActiveAppearanceEnabled = true
 
     // Window lifetime is owned here. Keys are current NSScreen instances for the latest topology.
     private(set) var overlayWindows: [NSScreen: MenuBarOverlayWindow] = [:]
@@ -104,16 +105,19 @@ final class DisplayManager {
     }
 
     func updateAppearance() {
-        // Tuning is resolved once per refresh to avoid repeated dictionary/file reads per window.
-        let selectedPreset = blurStyleManager.materialPreset
-        let presetTuning = glassTuningManager.tuning(for: selectedPreset)
+        let configuration = blurStyleManager.configuration
+        let tintWhiteAlpha = glassTuningManager.tintWhiteAlpha
+        let customCornersEnabled = glassTuningManager.customCornersEnabled
+        let cornerRadii = glassTuningManager.cornerRadii
 
         for window in overlayWindows.values {
             window.updateAppearance(
-                isDark: themeManager.isDark,
+                isDark: themeManager.systemIsDark,
                 reduceTransparency: themeManager.reduceTransparency,
-                materialPreset: selectedPreset,
-                presetTuning: presetTuning
+                blurConfiguration: configuration,
+                tintWhiteAlpha: tintWhiteAlpha,
+                customCornersEnabled: customCornersEnabled,
+                cornerRadii: cornerRadii
             )
         }
     }
@@ -125,6 +129,17 @@ final class DisplayManager {
             } else {
                 window.hide()
             }
+        }
+    }
+
+    func setForcedActiveAppearanceEnabled(_ enabled: Bool) {
+        guard forcedActiveAppearanceEnabled != enabled else {
+            return
+        }
+
+        forcedActiveAppearanceEnabled = enabled
+        for window in overlayWindows.values {
+            window.setForcedActiveAppearanceEnabled(enabled)
         }
     }
 
@@ -152,9 +167,11 @@ final class DisplayManager {
             if let existing = existingByDisplayID.removeValue(forKey: displayID) {
                 let window = existing.window
                 window.updateFrame(for: screen)
+                window.setForcedActiveAppearanceEnabled(forcedActiveAppearanceEnabled)
                 nextOverlayWindows[screen] = window
             } else {
                 let window = MenuBarOverlayWindow(screen: screen)
+                window.setForcedActiveAppearanceEnabled(forcedActiveAppearanceEnabled)
                 nextOverlayWindows[screen] = window
             }
         }
@@ -164,11 +181,25 @@ final class DisplayManager {
         }
 
         overlayWindows = nextOverlayWindows
+        updateActivationAnchors()
         updateAppearance()
         updateVisibility()
     }
 
-    private static func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
+    private func updateActivationAnchors() {
+        let anchorDisplayID = Self.displayID(for: NSScreen.main ?? NSScreen.screens.first)
+
+        for (screen, window) in overlayWindows {
+            let isAnchor = Self.displayID(for: screen) == anchorDisplayID
+            window.updateActivationAnchor(isAnchor: isAnchor)
+        }
+    }
+
+    private static func displayID(for screen: NSScreen?) -> CGDirectDisplayID? {
+        guard let screen else {
+            return nil
+        }
+
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         guard let number = screen.deviceDescription[key] as? NSNumber else {
             return nil

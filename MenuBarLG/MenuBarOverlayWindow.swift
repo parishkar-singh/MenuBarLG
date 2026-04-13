@@ -3,6 +3,9 @@ import AppKit
 @MainActor
 final class MenuBarOverlayWindow: NSWindow {
     private let glassViewController = GlassViewController()
+    private var activationRefreshWorkItem: DispatchWorkItem?
+    var isActivationAnchor = false
+    private var forcedActiveAppearanceEnabled = true
 
     init(screen: NSScreen) {
         super.init(contentRect: Self.frame(for: screen), styleMask: .borderless, backing: .buffered, defer: false)
@@ -21,37 +24,142 @@ final class MenuBarOverlayWindow: NSWindow {
     }
 
     override var canBecomeKey: Bool {
-        false
+        forcedActiveAppearanceEnabled
     }
 
     override var canBecomeMain: Bool {
-        false
+        forcedActiveAppearanceEnabled
     }
 
     func updateFrame(for screen: NSScreen) {
         setFrame(Self.frame(for: screen), display: false)
     }
 
+    func updateActivationAnchor(isAnchor: Bool) {
+        isActivationAnchor = isAnchor
+
+        guard isVisible else {
+            return
+        }
+
+        refreshForcedActiveAppearance()
+    }
+
+    func setForcedActiveAppearanceEnabled(_ enabled: Bool) {
+        forcedActiveAppearanceEnabled = enabled
+
+        if !enabled {
+            activationRefreshWorkItem?.cancel()
+            if let replacementWindow = NSApplication.shared.windows.first(where: { window in
+                window !== self && window.isVisible && !(window is MenuBarOverlayWindow)
+            }) {
+                replacementWindow.makeKeyAndOrderFront(nil)
+            }
+        } else if isVisible {
+            refreshForcedActiveAppearance()
+        }
+    }
+
     func updateAppearance(
         isDark: Bool,
         reduceTransparency: Bool,
-        materialPreset: BlurStyleManager.MaterialPreset,
-        presetTuning: GlassTuningManager.PresetTuning
+        blurConfiguration: BlurStyleManager.Configuration,
+        tintWhiteAlpha: Double,
+        customCornersEnabled: Bool,
+        cornerRadii: GlassTuningManager.CornerRadii
     ) {
         glassViewController.updateAppearance(
             isDark: isDark,
             reduceTransparency: reduceTransparency,
-            materialPreset: materialPreset,
-            presetTuning: presetTuning
+            blurConfiguration: blurConfiguration,
+            tintWhiteAlpha: tintWhiteAlpha,
+            customCornersEnabled: customCornersEnabled,
+            cornerRadii: cornerRadii
         )
     }
 
     func show() {
         orderFrontRegardless()
+        refreshForcedActiveAppearance()
     }
 
     func hide() {
+        activationRefreshWorkItem?.cancel()
         orderOut(nil)
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        activationRefreshWorkItem?.cancel()
+    }
+
+    @objc(_hasActiveAppearance)
+    func codex_hasActiveAppearance() -> Bool {
+        forcedActiveAppearanceEnabled
+    }
+
+    @objc(_hasActiveAppearanceIgnoringKeyFocus)
+    func codex_hasActiveAppearanceIgnoringKeyFocus() -> Bool {
+        forcedActiveAppearanceEnabled
+    }
+
+    @objc(_hasActiveControls)
+    func codex_hasActiveControls() -> Bool {
+        forcedActiveAppearanceEnabled
+    }
+
+    @objc(_hasKeyAppearance)
+    func codex_hasKeyAppearance() -> Bool {
+        forcedActiveAppearanceEnabled
+    }
+
+    @objc(_hasMainAppearance)
+    func codex_hasMainAppearance() -> Bool {
+        forcedActiveAppearanceEnabled
+    }
+
+    private func refreshForcedActiveAppearance() {
+        guard forcedActiveAppearanceEnabled else {
+            return
+        }
+
+        guard isActivationAnchor, isVisible else {
+            return
+        }
+
+        guard shouldReclaimKeyAppearance else {
+            return
+        }
+
+        activationRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isActivationAnchor, self.isVisible else {
+                return
+            }
+
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            self.makeKeyAndOrderFront(nil)
+        }
+
+        activationRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+    }
+
+    private var shouldReclaimKeyAppearance: Bool {
+        if isKeyWindow {
+            return false
+        }
+
+        if let keyWindow = NSApplication.shared.keyWindow, !(keyWindow is MenuBarOverlayWindow) {
+            return false
+        }
+
+        // Do not steal focus from the app's actual interactive windows like Settings.
+        let hasOtherVisibleAppWindow = NSApplication.shared.windows.contains { window in
+            window !== self && window.isVisible && !(window is MenuBarOverlayWindow)
+        }
+
+        return !hasOtherVisibleAppWindow
     }
 
     private static func frame(for screen: NSScreen) -> NSRect {

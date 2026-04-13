@@ -51,9 +51,6 @@ final class ThemeManager: NSObject {
 
         super.init()
 
-        // Apply the selected mode immediately so overlay appearance and settings UI start in sync.
-        applyApplicationAppearance()
-
         // Observe all three upstream signals requested by product requirements. Any one of them can
         // drive the effective overlay state.
         appearanceObservation = application.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] observedApplication, _ in
@@ -101,6 +98,17 @@ final class ThemeManager: NSObject {
         themeMode == .automatic
     }
 
+    var settingsWindowAppearance: NSAppearance? {
+        switch themeMode {
+        case .automatic:
+            return nil
+        case .light:
+            return NSAppearance(named: .aqua)
+        case .dark:
+            return NSAppearance(named: .darkAqua)
+        }
+    }
+
     func setThemeMode(_ themeMode: ThemeMode) {
         guard self.themeMode != themeMode else {
             return
@@ -108,7 +116,6 @@ final class ThemeManager: NSObject {
 
         self.themeMode = themeMode
         userDefaults.set(themeMode.rawValue, forKey: Self.themeModeUserDefaultsKey)
-        applyApplicationAppearance()
         updateState(
             systemIsDark: systemIsDark,
             reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
@@ -172,16 +179,5 @@ final class ThemeManager: NSObject {
 
     private static func isDarkAppearance(_ appearance: NSAppearance) -> Bool {
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    }
-
-    private func applyApplicationAppearance() {
-        switch themeMode {
-        case .automatic:
-            NSApplication.shared.appearance = nil
-        case .light:
-            NSApplication.shared.appearance = NSAppearance(named: .aqua)
-        case .dark:
-            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
-        }
     }
 }
