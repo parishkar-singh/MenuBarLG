@@ -9,6 +9,18 @@ It supports two rendering modes:
 
 The app runs as an `LSUIElement` accessory app (no Dock icon) and is controlled from a status item and a settings window.
 
+## Important: First Launch on Unsigned Builds
+
+If macOS shows “Apple could not verify `MenuBarLG-Release`”, use one of these:
+
+1. Finder: right-click `MenuBarLG-Release.app` -> `Open` -> `Open`.
+2. `System Settings > Privacy & Security` -> `Open Anyway`.
+3. Terminal fallback:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/MenuBarLG-Release.app
+```
+
 ## What It Does
 
 - Renders a non-interactive overlay window per display at the top safe-area/menu-bar region.
@@ -272,6 +284,18 @@ Overlay windows are configured to be non-disruptive:
 
 - Open `System Settings > General > Login Items`.
 - Approve/enable the app entry.
+
+### “Apple could not verify `MenuBarLG-Release`”
+
+For unsigned local/GitHub builds, use one of these trusted-install paths:
+
+1. In Finder, right-click `MenuBarLG-Release.app` -> `Open` -> `Open`.
+2. If it is still blocked, go to `System Settings > Privacy & Security`, then click `Open Anyway` for MenuBarLG.
+3. Terminal fallback (removes quarantine flag):
+
+```bash
+xattr -dr com.apple.quarantine /path/to/MenuBarLG-Release.app
+```
 
 ### “Appearance changes feel delayed”
 
